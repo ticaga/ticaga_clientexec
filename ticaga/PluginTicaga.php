@@ -9,16 +9,34 @@ require_once 'modules/admin/models/SnapinPlugin.php';
 
 class PluginTicaga extends SnapinPlugin
 {
-    public function getVariables()
-{
-    $variables = [
-        'Plugin Name' => [
-            'type' => 'hidden',
-            'description' => 'Used by CE to show plugin',
-            'value' => 'Ticaga'
-        ]
+    public $listeners = [
+        ["Client-Create", "Client-Update", "Client-PasswordChange"]
     ];
 
-    return $variables;
-}
+    /*
+    * Client-Create
+    * When a client is created on ClientExec, create the user on Ticaga.
+    */
+    public function Client-Create($e)
+    {
+        return false;
+    }
+
+    /*
+    * Client-Update
+    * When a client is updated on ClientExec, update the user on Ticaga.
+    */
+    public function Client-Update($e)
+    {
+        return false;
+    }
+
+    /*
+    * Client-PasswordChange
+    * When a client password is changed on ClientExec, send a reset password to the user on Ticaga.
+    */
+    public function Client-PasswordChange($e)
+    {
+        return false;
+    }
 }
