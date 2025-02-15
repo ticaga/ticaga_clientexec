@@ -9,7 +9,7 @@ require_once 'modules/admin/models/SnapinPlugin.php';
 
 class PluginTicaga extends SnapinPlugin
 {
-    public init()
+    private init()
     {
         /* 
          * Each snapin should have an init() function, 
