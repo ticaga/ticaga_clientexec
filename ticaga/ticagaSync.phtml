@@ -1,0 +1,228 @@
+<?php
+/**
+ * Ticaga Sync View - Admin page for syncing customers
+ * Place this file in: plugins/snapin/ticaga/ticagaSync.phtml
+ */
+?>
+
+<style>
+.ticaga-sync-container {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.ticaga-sync-card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+    padding: 20px;
+}
+.ticaga-sync-header {
+    margin-bottom: 30px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e0e0e0;
+}
+.ticaga-sync-row {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+.ticaga-sync-col {
+    width:450px !important;
+    flex: 1;
+}
+.ticaga-card-header {
+    padding: 15px;
+    border-radius: 8px 8px 0 0;
+    margin: -20px -20px 20px -20px;
+    color: white;
+    font-weight: bold;
+}
+.ticaga-card-header.primary {
+    background: #007bff;
+}
+.ticaga-card-header.info {
+    background: #17a2b8;
+}
+.ticaga-alert {
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 20px;
+}
+.ticaga-alert.success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+.ticaga-alert.error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+.ticaga-info-box {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 5px;
+    margin-top: 20px;
+}
+.ticaga-btn {
+    padding: 10px 20px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+}
+.ticaga-btn-primary {
+    background: #007bff;
+    color: white;
+}
+.ticaga-btn-info {
+    background: #17a2b8;
+    color: white;
+}
+.ticaga-form-group {
+    margin-bottom: 15px;
+}
+.ticaga-form-control {
+    width: 550px;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.ticaga-customer-select {
+    max-height: 300px;
+}
+.ticaga-small-text {
+    font-size: 12px;
+    color: #6c757d;
+    margin-top: 10px;
+    display: block;
+}
+@media (max-width: 768px) {
+    .ticaga-sync-row {
+        flex-direction: column;
+    }
+}
+</style>
+
+<div class="ticaga-sync-container">
+    <div class="ticaga-sync-header">
+        <h2>Ticaga Customer Sync</h2>
+    </div>
+
+<?php if (isset($syncResult) && $syncResult !== null): ?>
+    <div class="ticaga-alert <?php echo isset($syncResult['error']) ? 'error' : 'success'; ?>">
+        <?php if ($syncResult['type'] === 'bulk'): ?>
+            <?php if (isset($syncResult['error'])): ?>
+                <strong>Bulk Sync Failed:</strong> <?php echo htmlspecialchars($syncResult['error']); ?>
+            <?php else: ?>
+                <strong>Bulk Sync Complete!</strong><br>
+                Synced: <?php echo $syncResult['synced']; ?><br>
+                Failed: <?php echo $syncResult['failed']; ?><br>
+                Skipped: <?php echo $syncResult['skipped']; ?>
+                
+                <?php if (!empty($syncResult['errors'])): ?>
+                    <hr style="margin: 10px 0;">
+                    <strong>Errors:</strong>
+                    <ul style="margin: 10px 0;">
+                        <?php foreach (array_slice($syncResult['errors'], 0, 10) as $error): ?>
+                            <li><?php echo htmlspecialchars($error); ?></li>
+                        <?php endforeach; ?>
+                        <?php if (count($syncResult['errors']) > 10): ?>
+                            <li><em>... and <?php echo count($syncResult['errors']) - 10; ?> more errors</em></li>
+                        <?php endif; ?>
+                    </ul>
+                <?php endif; ?>
+            <?php endif; ?>
+        <?php elseif ($syncResult['type'] === 'single'): ?>
+            <?php if (isset($syncResult['result']['error'])): ?>
+                <strong>Sync Failed for Customer #<?php echo $syncResult['customer_id']; ?>:</strong><br>
+                <?php echo htmlspecialchars($syncResult['result']['error']); ?>
+            <?php else: ?>
+                <strong>Customer #<?php echo $syncResult['customer_id']; ?> synced successfully!</strong><br>
+                Ticaga ID: <?php echo $syncResult['result']['id'] ?? 'N/A'; ?>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+<?php endif; ?>
+
+<div class="ticaga-sync-row">
+    <div class="ticaga-sync-col">
+        <div class="ticaga-sync-card">
+            <div class="ticaga-card-header primary">
+                Bulk Sync All Customers
+            </div>
+            <p>Sync all active customers from ClientExec to Ticaga. This may take a while if you have many customers.</p>
+            <form method="post" onsubmit="return confirm('This will sync all customers. Continue?');">
+                <input type="hidden" name="bulk_sync" value="1">
+                <button type="submit" class="ticaga-btn ticaga-btn-primary">
+                    Sync All Customers
+                </button>
+            </form>
+            <small class="ticaga-small-text">
+                Note: This only syncs active customers and includes a small delay between each to avoid overwhelming the API.
+            </small>
+        </div>
+    </div>
+    
+    <div class="ticaga-sync-col">
+        <div class="ticaga-sync-card">
+            <div class="ticaga-card-header info">
+                Sync Single Customer
+            </div>
+            <p>Manually sync a specific customer by their ClientExec customer ID.</p>
+            <form method="post">
+                <div class="ticaga-form-group" style="width: 460px !important;">
+                    <label for="customer_id">Select Customer:</label>
+                    <?php if (isset($customers) && is_array($customers) && count($customers) > 0): ?>
+                        <select class="ticaga-form-control ticaga-customer-select" 
+                                id="customer_id" 
+                                name="customer_id"
+                                required>
+                            <option value="">-- Select a customer --</option>
+                            <?php foreach ($customers as $customer): ?>
+                                <option value="<?php echo htmlspecialchars($customer['id']); ?>">
+                                    <?php echo htmlspecialchars($customer['display']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="ticaga-small-text">
+                            <?php echo count($customers); ?> customers available
+                        </small>
+                    <?php else: ?>
+                        <select class="ticaga-form-control" id="customer_id" name="customer_id" disabled>
+                            <option value="">No customers found</option>
+                        </select>
+                        <small class="ticaga-small-text" style="color: #dc3545;">
+                            Unable to load customers. You can manually enter a customer ID instead.
+                        </small>
+                        <input type="number" 
+                               class="ticaga-form-control" 
+                               name="customer_id_manual" 
+                               placeholder="Enter customer ID manually" 
+                               min="1"
+                               style="margin-top: 10px;">
+                    <?php endif; ?>
+                </div>
+                <input type="hidden" name="sync_customer" value="1">
+                <button type="submit" class="ticaga-btn ticaga-btn-info">
+                    Sync This Customer
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="ticaga-info-box">
+    <h4 style="margin-top: 0;">About Customer Sync</h4>
+    <ul style="line-height: 1.8;">
+        <li><strong>Auto-sync:</strong> New customers are automatically synced to Ticaga when created in ClientExec</li>
+        <li><strong>Manual sync:</strong> Use the forms above to sync existing customers or re-sync specific ones</li>
+        <li><strong>What's synced:</strong> Email, name, and company information</li>
+        <li><strong>Linking:</strong> Each customer is linked via their ClientExec ID as the billing ID in Ticaga</li>
+    </ul>
+</div>
+</div>
