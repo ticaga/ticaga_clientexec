@@ -11,6 +11,8 @@ require_once 'modules/admin/models/SnapinPlugin.php';
 
 class PluginTicaga extends SnapinPlugin
 {
+    /** @var mixed */
+    private $db;
     // Event listeners for hooks
     public $listeners = [
         ["Customer-Create", "onCustomerCreate"]
@@ -103,10 +105,11 @@ class PluginTicaga extends SnapinPlugin
      */
     private function getDbConnection()
     {
-        if (isset($this->db)) {
-            return $this->db;
+        if ($this->db === null) {
+            $this->db = CE_Lib::getDb();
         }
-        return CE_Lib::getDb();
+
+        return $this->db;
     }
     
     /**
@@ -215,8 +218,10 @@ class PluginTicaga extends SnapinPlugin
     public function bulkSyncCustomers()
     {
         try {
+            $db = $this->getDbConnection();
+
             $query = "SELECT id FROM users WHERE status != 'Inactive' ORDER BY id";
-            $result = $this->db->query($query);
+            $result = $db->query($query);
             
             $synced = 0;
             $failed = 0;
