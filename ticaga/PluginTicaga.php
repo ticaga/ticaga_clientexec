@@ -123,6 +123,7 @@ class PluginTicaga extends SnapinPlugin
             $this->view->apiEmail = $this->getSetting('API Email Address');
             $this->view->autoSync = $this->getSetting('Auto Sync');
             $this->view->syncUrl = $this->buildSyncUrl();
+            $this->view->settingsUrl = $this->buildSettingsUrl();
             
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Error: " . $e->getMessage());
@@ -187,6 +188,16 @@ class PluginTicaga extends SnapinPlugin
     private function buildViewUrl()
     {
         return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga';
+    }
+
+    /**
+     * Build the URL that opens the Ticaga snapin settings configuration page.
+     *
+     * @return string
+     */
+    private function buildSettingsUrl()
+    {
+        return '/admin/index.php?fuse=admin&controller=settings&view=snapinsettings&plugin=ticaga&settings=plugins_snapins&type=Snapins';
     }
 
     /**
