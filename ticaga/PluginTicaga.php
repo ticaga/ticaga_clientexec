@@ -91,8 +91,10 @@ class PluginTicaga extends SnapinPlugin
 
             $this->ensureSession();
 
-            if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ticaga_action'])) {
-                $feedback = $this->processSyncRequest($_POST);
+            $requestData = $_REQUEST;
+
+            if (isset($requestData['ticaga_action'])) {
+                $feedback = $this->processSyncRequest($requestData);
                 $this->applySyncFeedbackToView($feedback);
             } else {
                 $feedback = $this->consumeSyncFeedbackFromSession();
@@ -201,13 +203,7 @@ class PluginTicaga extends SnapinPlugin
     {
         $this->ensureSession();
 
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            CE_Lib::log(3, 'Ticaga: Sync endpoint accessed without POST payload. Redirecting.');
-            CE_Lib::redirect($this->buildViewUrl());
-            return;
-        }
-
-        $feedback = $this->processSyncRequest($_POST);
+        $feedback = $this->processSyncRequest($_REQUEST);
         $this->storeSyncFeedbackForRedirect($feedback);
 
         CE_Lib::redirect($this->buildViewUrl());
