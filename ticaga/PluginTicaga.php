@@ -94,6 +94,11 @@ class PluginTicaga extends SnapinPlugin
             if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ticaga_action'])) {
                 $feedback = $this->processSyncRequest($_POST);
                 $this->applySyncFeedbackToView($feedback);
+            } else {
+                $feedback = $this->consumeSyncFeedbackFromSession();
+                if (!empty($feedback)) {
+                    $this->applySyncFeedbackToView($feedback);
+                }
             }
 
             // Load customers
@@ -120,12 +125,32 @@ class PluginTicaga extends SnapinPlugin
      */
     private function buildSyncUrl()
     {
-        return $this->buildViewUrl();
+        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=ticagaSync';
     }
 
     private function buildViewUrl()
     {
         return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=viewsnapin';
+    }
+
+    /**
+     * Dedicated sync endpoint used by form submissions. Processes the request then
+     * redirects back to the primary view so ClientExec renders the snapin normally.
+     */
+    public function ticagaSync()
+    {
+        $this->ensureSession();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            CE_Lib::log(3, 'Ticaga: Sync endpoint accessed without POST payload. Redirecting.');
+            CE_Lib::redirect($this->buildViewUrl());
+            return;
+        }
+
+        $feedback = $this->processSyncRequest($_POST);
+        $this->storeSyncFeedbackForRedirect($feedback);
+
+        CE_Lib::redirect($this->buildViewUrl());
     }
 
     /**
@@ -250,6 +275,37 @@ class PluginTicaga extends SnapinPlugin
         if (!empty($feedback['errors'])) {
             $this->view->syncErrors = array_values($feedback['errors']);
         }
+    }
+
+    /**
+     * Persist sync feedback to the session so it can be displayed after a redirect.
+     */
+    private function storeSyncFeedbackForRedirect(array $feedback)
+    {
+        if (!isset($_SESSION)) {
+            return;
+        }
+
+        $_SESSION['ticaga_sync_feedback'] = $feedback;
+    }
+
+    /**
+     * Retrieve sync feedback stored in the session and clear it once consumed.
+     */
+    private function consumeSyncFeedbackFromSession()
+    {
+        if (!isset($_SESSION) || !isset($_SESSION['ticaga_sync_feedback'])) {
+            return [];
+        }
+
+        $feedback = $_SESSION['ticaga_sync_feedback'];
+        unset($_SESSION['ticaga_sync_feedback']);
+
+        if (!is_array($feedback)) {
+            return [];
+        }
+
+        return $feedback;
     }
 
     /**
