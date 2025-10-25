@@ -153,6 +153,10 @@ class PluginTicaga extends SnapinPlugin
                 $queryParams['plugin'] = 'ticaga';
             }
 
+            if (empty($queryParams['v'])) {
+                $queryParams['v'] = 'ticaga';
+            }
+
             $queryParams['action'] = 'viewsnapin';
 
             return $path . '?' . http_build_query($queryParams);
@@ -163,7 +167,7 @@ class PluginTicaga extends SnapinPlugin
 
     private function buildViewUrl()
     {
-        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=viewsnapin';
+        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&v=ticaga&action=viewsnapin';
     }
 
     /**
