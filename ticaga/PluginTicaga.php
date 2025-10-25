@@ -95,12 +95,14 @@ class PluginTicaga extends SnapinPlugin
 
             if (isset($requestData['ticaga_action'])) {
                 $feedback = $this->processSyncRequest($requestData);
+                $this->storeSyncFeedbackForRedirect($feedback);
+                CE_Lib::redirect($this->buildViewUrl());
+                return;
+            }
+
+            $feedback = $this->consumeSyncFeedbackFromSession();
+            if (!empty($feedback)) {
                 $this->applySyncFeedbackToView($feedback);
-            } else {
-                $feedback = $this->consumeSyncFeedbackFromSession();
-                if (!empty($feedback)) {
-                    $this->applySyncFeedbackToView($feedback);
-                }
             }
 
             // Load customers
@@ -122,52 +124,81 @@ class PluginTicaga extends SnapinPlugin
     }
 
     /**
+     * Build a URL back to this snapin while preserving important routing parameters.
+     *
+     * @param array $overrides
+     * @param array $removals
+     * @return string
+     */
+    private function buildSnapinUrl(array $overrides = [], array $removals = [])
+    {
+        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+        $path = '/admin/index.php';
+        $queryParams = [];
+
+        if (!empty($uri)) {
+            $parts = parse_url($uri);
+            if (!empty($parts['path'])) {
+                $path = $parts['path'];
+            }
+
+            if (!empty($parts['query'])) {
+                parse_str($parts['query'], $queryParams);
+            }
+        }
+
+        $defaults = [
+            'fuse' => 'admin',
+            'controller' => 'snapins',
+            'view' => 'viewsnapin',
+            'plugin' => 'ticaga',
+            'action' => 'viewsnapin',
+            'v' => 'ticaga',
+        ];
+
+        foreach ($defaults as $key => $value) {
+            if (!isset($queryParams[$key]) || $queryParams[$key] === '') {
+                $queryParams[$key] = $value;
+            }
+        }
+
+        if (!empty($removals)) {
+            foreach ($removals as $removeKey) {
+                unset($queryParams[$removeKey]);
+            }
+        }
+
+        if (!empty($overrides)) {
+            foreach ($overrides as $key => $value) {
+                if ($value === null) {
+                    unset($queryParams[$key]);
+                    continue;
+                }
+
+                $queryParams[$key] = $value;
+            }
+        }
+
+        ksort($queryParams);
+
+        return $path . '?' . http_build_query($queryParams);
+    }
+
+    /**
      * Build the sync URL for form submissions
      */
     private function buildSyncUrl()
     {
-        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+        $removals = ['ticaga_action', 'customer_id', 'customer_ids', 'bulk_sync', 'synced', 'failed', 'message', 'success'];
 
-        if (!empty($uri)) {
-            $parts = parse_url($uri);
-            $path = isset($parts['path']) ? $parts['path'] : '/admin/index.php';
-
-            $queryParams = [];
-            if (isset($parts['query'])) {
-                parse_str($parts['query'], $queryParams);
-            }
-
-            if (empty($queryParams['fuse'])) {
-                $queryParams['fuse'] = 'admin';
-            }
-
-            if (empty($queryParams['controller'])) {
-                $queryParams['controller'] = 'snapins';
-            }
-
-            if (empty($queryParams['view'])) {
-                $queryParams['view'] = 'viewsnapin';
-            }
-
-            if (empty($queryParams['plugin'])) {
-                $queryParams['plugin'] = 'ticaga';
-            }
-
-            if (empty($queryParams['v'])) {
-                $queryParams['v'] = 'ticaga';
-            }
-
-            $queryParams['action'] = 'viewsnapin';
-
-            return $path . '?' . http_build_query($queryParams);
-        }
-
-        return $this->buildViewUrl();
+        return $this->buildSnapinUrl([], $removals);
     }
 
     private function buildViewUrl()
     {
-        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&v=ticaga&action=viewsnapin';
+        $removals = ['ticaga_action', 'customer_id', 'customer_ids', 'bulk_sync', 'synced', 'failed', 'message', 'success'];
+
+        return $this->buildSnapinUrl([], $removals);
     }
 
     /**
