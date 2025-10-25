@@ -371,16 +371,18 @@ class PluginTicaga extends SnapinPlugin
      */
     private function getSetting($key)
     {
-        $normalizedKey = $this->normalizeSettingKey($key);
-        $settingKey = 'plugin_ticaga_' . $normalizedKey;
+        $variants = $this->generateSettingKeyVariants($key);
 
-        // Try via settings object first using the normalized key.
-        if (isset($this->settings) && is_object($this->settings)) {
+        // Try via settings object first using any key variation that might exist.
+        if (!empty($variants) && isset($this->settings) && is_object($this->settings)) {
             try {
                 if (method_exists($this->settings, 'get')) {
-                    $value = $this->settings->get($settingKey);
-                    if ($value !== null && $value !== '') {
-                        return $value;
+                    foreach ($variants as $variant) {
+                        $settingKey = 'plugin_ticaga_' . $variant;
+                        $value = $this->settings->get($settingKey);
+                        if ($value !== null && $value !== '') {
+                            return $value;
+                        }
                     }
                 }
             } catch (Exception $e) {
@@ -390,20 +392,26 @@ class PluginTicaga extends SnapinPlugin
 
         // Load cached settings from the database and attempt to resolve the requested key.
         $this->buildPluginSettingsCache();
-        if (isset($this->pluginSettingsCache[$normalizedKey]) && $this->pluginSettingsCache[$normalizedKey] !== '') {
-            return $this->pluginSettingsCache[$normalizedKey];
+        foreach ($variants as $variant) {
+            if (isset($this->pluginSettingsCache[$variant]) && $this->pluginSettingsCache[$variant] !== '') {
+                return $this->pluginSettingsCache[$variant];
+            }
         }
 
-        // As a final attempt, look up the exact key in the database in case it was
-        // stored with a different format that does not normalize cleanly.
-        try {
-            $query = "SELECT value FROM setting WHERE name = ?";
-            $result = $this->db->query($query, $settingKey);
-            if ($result && $row = $result->fetch()) {
-                return $row['value'];
+        // As a final attempt, look up each possible key variation in the database.
+        foreach ($variants as $variant) {
+            try {
+                $query = "SELECT value FROM setting WHERE name = ?";
+                $result = $this->db->query($query, 'plugin_ticaga_' . $variant);
+                if ($result && $row = $result->fetch()) {
+                    $value = $row['value'];
+                    if ($value !== null && $value !== '') {
+                        return $value;
+                    }
+                }
+            } catch (Exception $e) {
+                CE_Lib::log(2, "Ticaga: DB error getting setting ({$variant}): " . $e->getMessage());
             }
-        } catch (Exception $e) {
-            CE_Lib::log(2, "Ticaga: DB error getting setting: " . $e->getMessage());
         }
 
         // Return default value
@@ -448,14 +456,74 @@ class PluginTicaga extends SnapinPlugin
                 }
 
                 $rawKey = substr($name, strlen('plugin_ticaga_'));
-                $normalizedKey = $this->normalizeSettingKey($rawKey);
+                $variants = $this->generateSettingKeyVariants($rawKey);
 
-                if ($normalizedKey !== '') {
-                    $this->pluginSettingsCache[$normalizedKey] = $value;
+                foreach ($variants as $variant) {
+                    if ($variant === '') {
+                        continue;
+                    }
+
+                    if (!array_key_exists($variant, $this->pluginSettingsCache) || $this->pluginSettingsCache[$variant] === '') {
+                        $this->pluginSettingsCache[$variant] = $value;
+                    }
                 }
             }
         } catch (Exception $e) {
             CE_Lib::log(2, "Ticaga: DB error building settings cache: " . $e->getMessage());
         }
+    }
+
+    /**
+     * Generate possible key variants for a plugin setting to accommodate differences in how
+     * ClientExec persists configuration values (spaces, case, underscores, etc.).
+     *
+     * @param string $key
+     * @return array
+     */
+    private function generateSettingKeyVariants($key)
+    {
+        $variants = [];
+
+        $trimmed = trim((string) $key);
+        if ($trimmed === '') {
+            return $variants;
+        }
+
+        $base = [];
+        $base[] = $trimmed;
+        $base[] = str_replace(' ', '_', $trimmed);
+        $base[] = str_replace([' ', '-'], '_', $trimmed);
+        $base[] = str_replace([' ', '-', '_'], '', $trimmed);
+
+        $lowercaseVariants = [];
+        foreach ($base as $candidate) {
+            if ($candidate === '') {
+                continue;
+            }
+            $lowercaseVariants[] = strtolower($candidate);
+        }
+
+        $base = array_merge($base, $lowercaseVariants);
+
+        $normalized = $this->normalizeSettingKey($trimmed);
+        if ($normalized !== '') {
+            $base[] = $normalized;
+            $base[] = str_replace('_', '', $normalized);
+        }
+
+        $unique = [];
+        foreach ($base as $candidate) {
+            $candidate = trim($candidate);
+            $candidate = trim($candidate, '_');
+            if ($candidate === '') {
+                continue;
+            }
+
+            if (!isset($unique[$candidate])) {
+                $unique[$candidate] = true;
+            }
+        }
+
+        return array_keys($unique);
     }
 }
