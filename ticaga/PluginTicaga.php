@@ -125,7 +125,39 @@ class PluginTicaga extends SnapinPlugin
      */
     private function buildSyncUrl()
     {
-        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=ticagaSync';
+        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+
+        if (!empty($uri)) {
+            $parts = parse_url($uri);
+            $path = isset($parts['path']) ? $parts['path'] : '/admin/index.php';
+
+            $queryParams = [];
+            if (isset($parts['query'])) {
+                parse_str($parts['query'], $queryParams);
+            }
+
+            if (empty($queryParams['fuse'])) {
+                $queryParams['fuse'] = 'admin';
+            }
+
+            if (empty($queryParams['controller'])) {
+                $queryParams['controller'] = 'snapins';
+            }
+
+            if (empty($queryParams['view'])) {
+                $queryParams['view'] = 'viewsnapin';
+            }
+
+            if (empty($queryParams['plugin'])) {
+                $queryParams['plugin'] = 'ticaga';
+            }
+
+            $queryParams['action'] = 'viewsnapin';
+
+            return $path . '?' . http_build_query($queryParams);
+        }
+
+        return $this->buildViewUrl();
     }
 
     private function buildViewUrl()

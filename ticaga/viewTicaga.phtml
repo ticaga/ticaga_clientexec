@@ -77,7 +77,6 @@
                 <div class="panel-body">
                     <?php if ($isConfigured): ?>
                         <form method="post" action="<?php echo $this->escape($this->syncUrl); ?>" id="bulkSyncForm">
-                            <input type="hidden" name="action" value="ticagaSync">
                             <input type="hidden" name="ticaga_action" value="sync">
                             <input type="hidden" name="bulk_sync" value="1">
                             <input type="hidden" name="sessionHash" value="<?php echo $this->escape($_SESSION['hash'] ?? ''); ?>">
@@ -139,7 +138,6 @@
                             <td>
                                 <?php if ($isConfigured): ?>
                                 <form method="post" action="<?php echo $this->escape($this->syncUrl); ?>" style="display:inline;">
-                                    <input type="hidden" name="action" value="ticagaSync">
                                     <input type="hidden" name="ticaga_action" value="sync">
                                     <input type="hidden" name="customer_id" value="<?php echo (int)$customer['id']; ?>">
                                     <input type="hidden" name="sessionHash" value="<?php echo $this->escape($_SESSION['hash'] ?? ''); ?>">
@@ -218,12 +216,6 @@ jQuery(document).ready(function($) {
             'method': 'post',
             'action': '<?php echo $this->escape($this->syncUrl ?? ''); ?>'
         });
-
-        form.append($('<input>', {
-            'type': 'hidden',
-            'name': 'action',
-            'value': 'ticagaSync'
-        }));
 
         form.append($('<input>', {
             'type': 'hidden',
