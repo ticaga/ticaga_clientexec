@@ -13,6 +13,12 @@ require_once 'modules/admin/models/SnapinPlugin.php';
 class PluginTicaga extends SnapinPlugin
 {
     /**
+     * Cached plugin settings indexed by normalized key name.
+     *
+     * @var array|null
+     */
+    private $pluginSettingsCache = null;
+    /**
      * Plugin configuration variables
      * 
      * @return array Configuration array
@@ -365,17 +371,10 @@ class PluginTicaga extends SnapinPlugin
      */
     private function getSetting($key)
     {
-        // Build the key exactly as ClientExec stores it:
-        // plugin_ticaga_ (lowercase) + Setting Name (with underscores for spaces)
-        // Normalize the key the same way ClientExec stores it in the
-        // "setting" table (all lowercase with underscores)
-        $normalizedKey = strtolower(trim($key));
-        $normalizedKey = preg_replace('/[^a-z0-9]+/', '_', $normalizedKey);
-        $normalizedKey = trim($normalizedKey, '_');
-
+        $normalizedKey = $this->normalizeSettingKey($key);
         $settingKey = 'plugin_ticaga_' . $normalizedKey;
-        
-        // Try via settings object first
+
+        // Try via settings object first using the normalized key.
         if (isset($this->settings) && is_object($this->settings)) {
             try {
                 if (method_exists($this->settings, 'get')) {
@@ -388,8 +387,15 @@ class PluginTicaga extends SnapinPlugin
                 CE_Lib::log(2, "Ticaga: Settings object error: " . $e->getMessage());
             }
         }
-        
-        // Fallback: Direct database query
+
+        // Load cached settings from the database and attempt to resolve the requested key.
+        $this->buildPluginSettingsCache();
+        if (isset($this->pluginSettingsCache[$normalizedKey]) && $this->pluginSettingsCache[$normalizedKey] !== '') {
+            return $this->pluginSettingsCache[$normalizedKey];
+        }
+
+        // As a final attempt, look up the exact key in the database in case it was
+        // stored with a different format that does not normalize cleanly.
         try {
             $query = "SELECT value FROM setting WHERE name = ?";
             $result = $this->db->query($query, $settingKey);
@@ -399,9 +405,57 @@ class PluginTicaga extends SnapinPlugin
         } catch (Exception $e) {
             CE_Lib::log(2, "Ticaga: DB error getting setting: " . $e->getMessage());
         }
-        
+
         // Return default value
         $variables = $this->getVariables();
         return isset($variables[$key]['value']) ? $variables[$key]['value'] : '';
+    }
+
+    /**
+     * Normalize a setting key to the lowercase underscore format used by ClientExec.
+     *
+     * @param string $key
+     * @return string
+     */
+    private function normalizeSettingKey($key)
+    {
+        $normalizedKey = strtolower(trim($key));
+        $normalizedKey = preg_replace('/[^a-z0-9]+/', '_', $normalizedKey);
+        return trim($normalizedKey, '_');
+    }
+
+    /**
+     * Populate the settings cache with any values stored for the Ticaga plugin.
+     */
+    private function buildPluginSettingsCache()
+    {
+        if ($this->pluginSettingsCache !== null) {
+            return;
+        }
+
+        $this->pluginSettingsCache = [];
+
+        try {
+            $query = "SELECT name, value FROM setting WHERE name LIKE ?";
+            $result = $this->db->query($query, 'plugin_ticaga_%');
+
+            while ($result && ($row = $result->fetch())) {
+                $name = $row['name'];
+                $value = $row['value'];
+
+                if (stripos($name, 'plugin_ticaga_') !== 0) {
+                    continue;
+                }
+
+                $rawKey = substr($name, strlen('plugin_ticaga_'));
+                $normalizedKey = $this->normalizeSettingKey($rawKey);
+
+                if ($normalizedKey !== '') {
+                    $this->pluginSettingsCache[$normalizedKey] = $value;
+                }
+            }
+        } catch (Exception $e) {
+            CE_Lib::log(2, "Ticaga: DB error building settings cache: " . $e->getMessage());
+        }
     }
 }
