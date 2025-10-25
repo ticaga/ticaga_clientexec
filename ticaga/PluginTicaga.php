@@ -367,7 +367,13 @@ class PluginTicaga extends SnapinPlugin
     {
         // Build the key exactly as ClientExec stores it:
         // plugin_ticaga_ (lowercase) + Setting Name (with underscores for spaces)
-        $settingKey = 'plugin_ticaga_' . str_replace(' ', '_', $key);
+        // Normalize the key the same way ClientExec stores it in the
+        // "setting" table (all lowercase with underscores)
+        $normalizedKey = strtolower(trim($key));
+        $normalizedKey = preg_replace('/[^a-z0-9]+/', '_', $normalizedKey);
+        $normalizedKey = trim($normalizedKey, '_');
+
+        $settingKey = 'plugin_ticaga_' . $normalizedKey;
         
         // Try via settings object first
         if (isset($this->settings) && is_object($this->settings)) {
