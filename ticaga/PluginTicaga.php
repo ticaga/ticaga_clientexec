@@ -91,7 +91,7 @@ class PluginTicaga extends SnapinPlugin
 
             $this->ensureSession();
 
-            $syncFeedback = $this->handleSyncSubmission();
+            $syncFeedback = $this->consumeSyncFeedbackFromSession();
             if (!empty($syncFeedback)) {
                 $this->applySyncFeedbackToView($syncFeedback);
             }
@@ -120,7 +120,7 @@ class PluginTicaga extends SnapinPlugin
      */
     private function buildSyncUrl()
     {
-        return $this->buildViewUrl();
+        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=ticagaSync';
     }
 
     /**
@@ -131,6 +131,37 @@ class PluginTicaga extends SnapinPlugin
     private function buildViewUrl()
     {
         return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=viewsnapin';
+    }
+
+    /**
+     * Process Ticaga sync submissions and redirect back to the main view with feedback.
+     */
+    public function ticagaSync()
+    {
+        $this->ensureSession();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->storeSyncFeedbackInSession([
+                'success' => false,
+                'message' => 'Invalid request method for Ticaga sync.'
+            ]);
+            $this->redirectToView();
+            return;
+        }
+
+        $feedback = $this->processSyncRequest($_POST);
+        $this->storeSyncFeedbackInSession($feedback);
+        $this->redirectToView();
+    }
+
+    /**
+     * Redirect the browser back to the Ticaga snapin view and end execution.
+     */
+    private function redirectToView()
+    {
+        $viewUrl = $this->buildViewUrl();
+        header('Location: ' . $viewUrl);
+        exit;
     }
 
     /**
@@ -148,36 +179,44 @@ class PluginTicaga extends SnapinPlugin
      *
      * @return array
      */
-    private function handleSyncSubmission()
+    private function processSyncRequest(array $data)
     {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            return [];
+        $action = isset($data['ticaga_action']) ? trim((string) $data['ticaga_action']) : '';
+        if ($action === '') {
+            return [
+                'success' => false,
+                'message' => 'Sync request was missing the Ticaga action flag.'
+            ];
         }
 
-        $action = isset($_POST['ticaga_action']) ? trim((string) $_POST['ticaga_action']) : '';
         if (strcasecmp($action, 'sync') !== 0) {
-            return [];
+            return [
+                'success' => false,
+                'message' => 'Unrecognized Ticaga sync action: ' . $action
+            ];
         }
 
         $result = null;
         $errorMessage = null;
 
         try {
-            CE_Lib::log(4, "Ticaga: Sync submission received in view");
+            CE_Lib::log(4, "Ticaga: Sync submission received");
 
-            $bulkSync = !empty($_POST['bulk_sync']);
-            $selectedCustomers = isset($_POST['customer_ids']) ? $_POST['customer_ids'] : [];
+            $bulkSync = !empty($data['bulk_sync']);
+            $selectedCustomers = isset($data['customer_ids']) ? $data['customer_ids'] : [];
 
             if (!is_array($selectedCustomers)) {
                 $selectedCustomers = [$selectedCustomers];
             }
 
+            $selectedCustomers = array_values(array_filter(array_map('intval', $selectedCustomers)));
+
             if ($bulkSync) {
-                CE_Lib::log(4, "Ticaga: Starting bulk sync from view");
+                CE_Lib::log(4, "Ticaga: Starting bulk sync from action handler");
                 $result = $this->performBulkSync($selectedCustomers);
             } else {
-                $customerId = isset($_POST['customer_id']) ? (int) $_POST['customer_id'] : 0;
-                CE_Lib::log(4, "Ticaga: Starting single customer sync from view ({$customerId})");
+                $customerId = isset($data['customer_id']) ? (int) $data['customer_id'] : 0;
+                CE_Lib::log(4, "Ticaga: Starting single customer sync from action handler ({$customerId})");
                 $result = $this->syncSingleCustomer($customerId);
             }
 
@@ -247,6 +286,36 @@ class PluginTicaga extends SnapinPlugin
         if (!empty($feedback['errors'])) {
             $this->view->syncErrors = array_values($feedback['errors']);
         }
+    }
+
+    /**
+     * Persist sync feedback in the session so it can be shown after redirects.
+     *
+     * @param array $feedback
+     */
+    private function storeSyncFeedbackInSession(array $feedback)
+    {
+        $this->ensureSession();
+        $_SESSION['ticaga_sync_feedback'] = $feedback;
+    }
+
+    /**
+     * Retrieve and clear stored sync feedback from the session.
+     *
+     * @return array
+     */
+    private function consumeSyncFeedbackFromSession()
+    {
+        $this->ensureSession();
+
+        if (empty($_SESSION['ticaga_sync_feedback']) || !is_array($_SESSION['ticaga_sync_feedback'])) {
+            return [];
+        }
+
+        $feedback = $_SESSION['ticaga_sync_feedback'];
+        unset($_SESSION['ticaga_sync_feedback']);
+
+        return $feedback;
     }
 
     /**
