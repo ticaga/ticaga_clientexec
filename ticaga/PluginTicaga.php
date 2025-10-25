@@ -113,6 +113,7 @@ class PluginTicaga extends SnapinPlugin
             $this->view->autoSync = $this->getSetting('Auto Sync');
             $this->view->syncUrl = $this->buildSyncUrl();
             $this->view->settingsUrl = $this->buildSettingsUrl();
+            $this->view->sessionHash = $this->getSessionHash();
             
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Error: " . $e->getMessage());
@@ -163,6 +164,29 @@ class PluginTicaga extends SnapinPlugin
     private function buildViewUrl()
     {
         return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=viewsnapin';
+    }
+
+    /**
+     * Retrieve the current ClientExec session hash for form submissions.
+     *
+     * @return string
+     */
+    private function getSessionHash()
+    {
+        $this->ensureSession();
+
+        if (!empty($_SESSION['hash'])) {
+            return $_SESSION['hash'];
+        }
+
+        if (method_exists('CE_Lib', 'getSessionHash')) {
+            $hash = CE_Lib::getSessionHash();
+            if (!empty($hash)) {
+                return $hash;
+            }
+        }
+
+        return '';
     }
 
     /**
