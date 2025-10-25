@@ -91,7 +91,20 @@ class PluginTicaga extends SnapinPlugin
 
             $this->ensureSession();
 
+            $requestData = $this->collectRequestData();
+
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && $this->isSyncRequest($requestData)) {
+                $feedback = $this->processSyncRequest($requestData);
+                $this->storeSyncFeedbackForRedirect($feedback);
+                CE_Lib::redirect($this->buildViewUrl());
+                return;
+            }
+
             $feedback = $this->consumeSyncFeedbackFromSession();
+            if (empty($feedback) && $this->isSyncRequest($requestData)) {
+                $feedback = $this->processSyncRequest($requestData);
+            }
+
             if (!empty($feedback)) {
                 $this->applySyncFeedbackToView($feedback);
             }
@@ -183,7 +196,7 @@ class PluginTicaga extends SnapinPlugin
     {
         $removals = ['ticaga_action', 'customer_id', 'customer_ids', 'bulk_sync', 'synced', 'failed', 'message', 'success'];
 
-        return $this->buildSnapinUrl(['action' => 'ticagaSync'], $removals);
+        return $this->buildSnapinUrl([], $removals);
     }
 
     private function buildViewUrl()
@@ -194,6 +207,45 @@ class PluginTicaga extends SnapinPlugin
     }
 
     /**
+     * Combine query string and post body data for request inspection.
+     *
+     * @return array
+     */
+    private function collectRequestData()
+    {
+        $data = [];
+
+        if (isset($_GET) && is_array($_GET)) {
+            $data = $_GET;
+        }
+
+        if (isset($_POST) && is_array($_POST)) {
+            foreach ($_POST as $key => $value) {
+                $data[$key] = $value;
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Determine whether the current request is attempting to trigger a sync run.
+     *
+     * @param array $data
+     * @return bool
+     */
+    private function isSyncRequest(array $data)
+    {
+        if (!isset($data['ticaga_action'])) {
+            return false;
+        }
+
+        $action = trim((string) $data['ticaga_action']);
+
+        return strcasecmp($action, 'sync') === 0;
+    }
+
+    /**
      * Dedicated sync endpoint used by form submissions. Processes the request then
      * redirects back to the primary view so ClientExec renders the snapin normally.
      */
@@ -201,12 +253,14 @@ class PluginTicaga extends SnapinPlugin
     {
         $this->ensureSession();
 
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        $data = $this->collectRequestData();
+
+        if (!$this->isSyncRequest($data)) {
             CE_Lib::redirect($this->buildViewUrl());
             return;
         }
 
-        $feedback = $this->processSyncRequest($_REQUEST);
+        $feedback = $this->processSyncRequest($data);
         $this->storeSyncFeedbackForRedirect($feedback);
 
         CE_Lib::redirect($this->buildViewUrl());
