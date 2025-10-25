@@ -130,7 +130,7 @@ class PluginTicaga extends SnapinPlugin
      */
     private function buildViewUrl()
     {
-        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga';
+        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=viewsnapin';
     }
 
     /**
