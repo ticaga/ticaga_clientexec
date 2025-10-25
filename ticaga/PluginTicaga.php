@@ -89,27 +89,11 @@ class PluginTicaga extends SnapinPlugin
         try {
             CE_Lib::log(4, "Ticaga: Loading main view");
 
-            $flash = $this->consumeSyncFlash();
-            if (!empty($flash)) {
-                if (isset($flash['success'])) {
-                    $this->view->success = (bool) $flash['success'];
-                }
+            $this->ensureSession();
 
-                if (!empty($flash['message'])) {
-                    if (!empty($this->view->success)) {
-                        $this->view->message = $flash['message'];
-                    } else {
-                        $this->view->error = $flash['message'];
-                    }
-                }
-
-                if (isset($flash['synced'])) {
-                    $this->view->syncedCount = (int) $flash['synced'];
-                }
-
-                if (!empty($flash['errors']) && is_array($flash['errors'])) {
-                    $this->view->syncErrors = $flash['errors'];
-                }
+            $syncFeedback = $this->handleSyncSubmission();
+            if (!empty($syncFeedback)) {
+                $this->applySyncFeedbackToView($syncFeedback);
             }
 
             // Load customers
@@ -132,52 +116,11 @@ class PluginTicaga extends SnapinPlugin
     }
 
     /**
-     * Sync action handler
-     */
-    function ticagaSync()
-    {
-        $result = null;
-        $errorMessage = null;
-
-        try {
-            CE_Lib::log(4, "Ticaga: Sync action initiated");
-
-            $bulkSync = isset($_REQUEST['bulk_sync']) ? (int)$_REQUEST['bulk_sync'] : 0;
-            $selectedCustomers = isset($_REQUEST['customer_ids']) ? $_REQUEST['customer_ids'] : [];
-
-            if (!is_array($selectedCustomers)) {
-                $selectedCustomers = [$selectedCustomers];
-            }
-
-            if ($bulkSync) {
-                CE_Lib::log(4, "Ticaga: Starting bulk sync");
-                $result = $this->performBulkSync($selectedCustomers);
-            } else {
-                CE_Lib::log(4, "Ticaga: Starting single customer sync");
-                $customerId = isset($_REQUEST['customer_id']) ? (int)$_REQUEST['customer_id'] : 0;
-                $result = $this->syncSingleCustomer($customerId);
-            }
-
-        } catch (Exception $e) {
-            CE_Lib::log(1, "Ticaga Sync Error: " . $e->getMessage());
-            $errorMessage = $e->getMessage();
-        }
-
-        $flash = $this->prepareSyncFlash($result, $errorMessage);
-        if (!empty($flash)) {
-            $this->ensureSession();
-            $_SESSION['ticaga_sync_flash'] = $flash;
-        }
-
-        $this->redirectToMainView();
-    }
-
-    /**
      * Build the sync URL for form submissions
      */
     private function buildSyncUrl()
     {
-        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=ticagaSync';
+        return $this->buildViewUrl();
     }
 
     /**
@@ -198,6 +141,112 @@ class PluginTicaga extends SnapinPlugin
     private function buildSettingsUrl()
     {
         return '/admin/index.php?fuse=admin&controller=settings&view=snapinsettings&plugin=ticaga&settings=plugins_snapins&type=Snapins';
+    }
+
+    /**
+     * Handle sync submissions made from the main view and return normalized feedback.
+     *
+     * @return array
+     */
+    private function handleSyncSubmission()
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            return [];
+        }
+
+        $action = isset($_POST['ticaga_action']) ? trim((string) $_POST['ticaga_action']) : '';
+        if (strcasecmp($action, 'sync') !== 0) {
+            return [];
+        }
+
+        $result = null;
+        $errorMessage = null;
+
+        try {
+            CE_Lib::log(4, "Ticaga: Sync submission received in view");
+
+            $bulkSync = !empty($_POST['bulk_sync']);
+            $selectedCustomers = isset($_POST['customer_ids']) ? $_POST['customer_ids'] : [];
+
+            if (!is_array($selectedCustomers)) {
+                $selectedCustomers = [$selectedCustomers];
+            }
+
+            if ($bulkSync) {
+                CE_Lib::log(4, "Ticaga: Starting bulk sync from view");
+                $result = $this->performBulkSync($selectedCustomers);
+            } else {
+                $customerId = isset($_POST['customer_id']) ? (int) $_POST['customer_id'] : 0;
+                CE_Lib::log(4, "Ticaga: Starting single customer sync from view ({$customerId})");
+                $result = $this->syncSingleCustomer($customerId);
+            }
+
+        } catch (Exception $e) {
+            CE_Lib::log(1, "Ticaga Sync Error: " . $e->getMessage());
+            $errorMessage = $e->getMessage();
+        }
+
+        return $this->normalizeSyncFeedback($result, $errorMessage);
+    }
+
+    /**
+     * Normalize sync results or errors into a consistent array structure.
+     *
+     * @param array|null $result
+     * @param string|null $errorMessage
+     * @return array
+     */
+    private function normalizeSyncFeedback($result, $errorMessage)
+    {
+        $feedback = [];
+
+        if (is_array($result)) {
+            $feedback = $result;
+        }
+
+        if (!isset($feedback['message']) || $feedback['message'] === '') {
+            if (!empty($errorMessage)) {
+                $feedback['message'] = $errorMessage;
+            }
+        }
+
+        if (!isset($feedback['success'])) {
+            $feedback['success'] = empty($errorMessage) && !empty($feedback);
+        }
+
+        if (!isset($feedback['errors']) || !is_array($feedback['errors'])) {
+            $feedback['errors'] = [];
+        }
+
+        return $feedback;
+    }
+
+    /**
+     * Apply normalized sync feedback to the view instance for rendering.
+     *
+     * @param array $feedback
+     */
+    private function applySyncFeedbackToView(array $feedback)
+    {
+        if (isset($feedback['success'])) {
+            $this->view->success = (bool) $feedback['success'];
+        }
+
+        if (!empty($feedback['message'])) {
+            if (!empty($this->view->success)) {
+                $this->view->message = $feedback['message'];
+            } else {
+                $this->view->error = $feedback['message'];
+            }
+        }
+
+        if (isset($feedback['synced'])) {
+            $this->view->syncedCount = (int) $feedback['synced'];
+        }
+
+        if (!empty($feedback['errors'])) {
+            $this->view->syncErrors = array_values($feedback['errors']);
+        }
     }
 
     /**
@@ -480,96 +529,6 @@ class PluginTicaga extends SnapinPlugin
         $normalizedKey = strtolower(trim($key));
         $normalizedKey = preg_replace('/[^a-z0-9]+/', '_', $normalizedKey);
         return trim($normalizedKey, '_');
-    }
-
-    /**
-     * Redirect the browser back to the main snapin view.
-     */
-    private function redirectToMainView()
-    {
-        $viewUrl = $this->buildViewUrl();
-
-        if (!headers_sent()) {
-            header('Location: ' . $viewUrl);
-            exit;
-        }
-
-        echo '<script>window.location.href=' . json_encode($viewUrl) . ';</script>';
-        exit;
-    }
-
-    /**
-     * Build a flash array from the sync result for display after redirect.
-     *
-     * @param array|null $result
-     * @param string|null $errorMessage
-     * @return array
-     */
-    private function prepareSyncFlash($result, $errorMessage)
-    {
-        $flash = [];
-
-        if (is_array($result)) {
-            $flash = $result;
-        }
-
-        if (!isset($flash['message']) || $flash['message'] === '') {
-            if (!empty($errorMessage)) {
-                $flash['message'] = $errorMessage;
-            }
-        }
-
-        if (!isset($flash['success'])) {
-            $flash['success'] = is_array($result) ? !empty($result['success']) : false;
-        } else {
-            $flash['success'] = (bool) $flash['success'];
-        }
-
-        if (!empty($errorMessage) && empty($flash['message'])) {
-            $flash['message'] = $errorMessage;
-        }
-
-        if (!empty($errorMessage) && $flash['success']) {
-            $flash['success'] = false;
-        }
-
-        if (!isset($flash['errors'])) {
-            $flash['errors'] = [];
-        } elseif (!is_array($flash['errors'])) {
-            $flash['errors'] = (array) $flash['errors'];
-        }
-
-        if (isset($flash['message']) && !is_string($flash['message'])) {
-            $flash['message'] = (string) $flash['message'];
-        }
-
-        $hasContent = !empty($flash['success']) || !empty($flash['message'])
-            || (isset($flash['synced']) && $flash['synced'])
-            || !empty($flash['errors']);
-
-        return $hasContent ? $flash : [];
-    }
-
-    /**
-     * Retrieve and clear the sync flash message from the session.
-     *
-     * @return array
-     */
-    private function consumeSyncFlash()
-    {
-        $this->ensureSession();
-        if (!isset($_SESSION['ticaga_sync_flash'])) {
-            return [];
-        }
-
-        $flash = $_SESSION['ticaga_sync_flash'];
-        unset($_SESSION['ticaga_sync_flash']);
-
-        if (!is_array($flash)) {
-            return [];
-        }
-
-        return $flash;
     }
 
     /**
