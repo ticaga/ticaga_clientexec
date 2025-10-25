@@ -157,6 +157,7 @@
             </div>
             <p>Sync all active customers from ClientExec to Ticaga. This may take a while if you have many customers.</p>
             <form method="post" onsubmit="return confirm('This will sync all customers. Continue?');">
+                <input type="hidden" name="action" value="ticagaSync">
                 <input type="hidden" name="bulk_sync" value="1">
                 <button type="submit" class="ticaga-btn ticaga-btn-primary">
                     Sync All Customers
@@ -175,6 +176,7 @@
             </div>
             <p>Manually sync a specific customer by their ClientExec customer ID.</p>
             <form method="post">
+                <input type="hidden" name="action" value="ticagaSync">
                 <div class="ticaga-form-group" style="width: 460px !important;">
                     <label for="customer_id">Select Customer:</label>
                     <?php if (isset($customers) && is_array($customers) && count($customers) > 0): ?>
