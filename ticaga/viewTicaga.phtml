@@ -15,6 +15,17 @@
             <?php endif; ?>
         </div>
     <?php endif; ?>
+
+    <?php if (!empty($this->syncErrors) && is_array($this->syncErrors)): ?>
+        <div class="alert alert-warning">
+            <strong>Some customers could not be synced:</strong>
+            <ul>
+                <?php foreach ($this->syncErrors as $syncError): ?>
+                    <li><?php echo $this->escape($syncError); ?></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
     
     <div class="row">
         <div class="col-md-6">

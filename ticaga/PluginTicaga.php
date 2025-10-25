@@ -88,7 +88,30 @@ class PluginTicaga extends SnapinPlugin
     {
         try {
             CE_Lib::log(4, "Ticaga: Loading main view");
-            
+
+            $flash = $this->consumeSyncFlash();
+            if (!empty($flash)) {
+                if (isset($flash['success'])) {
+                    $this->view->success = (bool) $flash['success'];
+                }
+
+                if (!empty($flash['message'])) {
+                    if (!empty($this->view->success)) {
+                        $this->view->message = $flash['message'];
+                    } else {
+                        $this->view->error = $flash['message'];
+                    }
+                }
+
+                if (isset($flash['synced'])) {
+                    $this->view->syncedCount = (int) $flash['synced'];
+                }
+
+                if (!empty($flash['errors']) && is_array($flash['errors'])) {
+                    $this->view->syncErrors = $flash['errors'];
+                }
+            }
+
             // Load customers
             $customers = $this->loadCustomers();
             CE_Lib::log(4, "Ticaga: Loaded " . count($customers) . " customers");
@@ -113,6 +136,7 @@ class PluginTicaga extends SnapinPlugin
     function ticagaSync()
     {
         $result = null;
+        $errorMessage = null;
 
         try {
             CE_Lib::log(4, "Ticaga: Sync action initiated");
@@ -135,24 +159,16 @@ class PluginTicaga extends SnapinPlugin
 
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Sync Error: " . $e->getMessage());
-            $this->view->error = $e->getMessage();
-            $this->view->success = false;
+            $errorMessage = $e->getMessage();
         }
 
-        // Always reload the main view template so the user is redirected back to the
-        // snapin interface rather than a blank page for the sync action.
-        $this->viewTicaga();
-
-        if (is_array($result)) {
-            $this->view->syncResult = $result;
-            $this->view->success = $result['success'];
-            $this->view->message = $result['message'];
-            $this->view->syncedCount = isset($result['synced']) ? (int)$result['synced'] : 0;
-
-            if (isset($result['errors'])) {
-                $this->view->syncErrors = $result['errors'];
-            }
+        $flash = $this->prepareSyncFlash($result, $errorMessage);
+        if (!empty($flash)) {
+            $this->ensureSession();
+            $_SESSION['ticaga_sync_flash'] = $flash;
         }
+
+        $this->redirectToMainView();
     }
 
     /**
@@ -161,6 +177,16 @@ class PluginTicaga extends SnapinPlugin
     private function buildSyncUrl()
     {
         return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=ticagaSync';
+    }
+
+    /**
+     * Build the URL that renders the Ticaga snapin view.
+     *
+     * @return string
+     */
+    private function buildViewUrl()
+    {
+        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga';
     }
 
     /**
@@ -446,6 +472,96 @@ class PluginTicaga extends SnapinPlugin
     }
 
     /**
+     * Redirect the browser back to the main snapin view.
+     */
+    private function redirectToMainView()
+    {
+        $viewUrl = $this->buildViewUrl();
+
+        if (!headers_sent()) {
+            header('Location: ' . $viewUrl);
+            exit;
+        }
+
+        echo '<script>window.location.href=' . json_encode($viewUrl) . ';</script>';
+        exit;
+    }
+
+    /**
+     * Build a flash array from the sync result for display after redirect.
+     *
+     * @param array|null $result
+     * @param string|null $errorMessage
+     * @return array
+     */
+    private function prepareSyncFlash($result, $errorMessage)
+    {
+        $flash = [];
+
+        if (is_array($result)) {
+            $flash = $result;
+        }
+
+        if (!isset($flash['message']) || $flash['message'] === '') {
+            if (!empty($errorMessage)) {
+                $flash['message'] = $errorMessage;
+            }
+        }
+
+        if (!isset($flash['success'])) {
+            $flash['success'] = is_array($result) ? !empty($result['success']) : false;
+        } else {
+            $flash['success'] = (bool) $flash['success'];
+        }
+
+        if (!empty($errorMessage) && empty($flash['message'])) {
+            $flash['message'] = $errorMessage;
+        }
+
+        if (!empty($errorMessage) && $flash['success']) {
+            $flash['success'] = false;
+        }
+
+        if (!isset($flash['errors'])) {
+            $flash['errors'] = [];
+        } elseif (!is_array($flash['errors'])) {
+            $flash['errors'] = (array) $flash['errors'];
+        }
+
+        if (isset($flash['message']) && !is_string($flash['message'])) {
+            $flash['message'] = (string) $flash['message'];
+        }
+
+        $hasContent = !empty($flash['success']) || !empty($flash['message'])
+            || (isset($flash['synced']) && $flash['synced'])
+            || !empty($flash['errors']);
+
+        return $hasContent ? $flash : [];
+    }
+
+    /**
+     * Retrieve and clear the sync flash message from the session.
+     *
+     * @return array
+     */
+    private function consumeSyncFlash()
+    {
+        $this->ensureSession();
+        if (!isset($_SESSION['ticaga_sync_flash'])) {
+            return [];
+        }
+
+        $flash = $_SESSION['ticaga_sync_flash'];
+        unset($_SESSION['ticaga_sync_flash']);
+
+        if (!is_array($flash)) {
+            return [];
+        }
+
+        return $flash;
+    }
+
+    /**
      * Populate the settings cache with any values stored for the Ticaga plugin.
      */
     private function buildPluginSettingsCache()
@@ -538,5 +654,15 @@ class PluginTicaga extends SnapinPlugin
         }
 
         return array_keys($unique);
+    }
+
+    /**
+     * Ensure a PHP session is available before accessing $_SESSION.
+     */
+    private function ensureSession()
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            @session_start();
+        }
     }
 }
