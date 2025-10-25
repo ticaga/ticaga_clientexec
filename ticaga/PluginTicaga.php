@@ -13,6 +13,12 @@ require_once 'modules/admin/models/SnapinPlugin.php';
 class PluginTicaga extends SnapinPlugin
 {
     /**
+     * Cached plugin settings indexed by normalized key name.
+     *
+     * @var array|null
+     */
+    private $pluginSettingsCache = null;
+    /**
      * Plugin configuration variables
      * 
      * @return array Configuration array
@@ -82,7 +88,27 @@ class PluginTicaga extends SnapinPlugin
     {
         try {
             CE_Lib::log(4, "Ticaga: Loading main view");
-            
+
+            $this->ensureSession();
+
+            $requestData = $this->collectRequestData();
+
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && $this->isSyncRequest($requestData)) {
+                $feedback = $this->processSyncRequest($requestData);
+                $this->storeSyncFeedbackForRedirect($feedback);
+                CE_Lib::redirect($this->buildViewUrl());
+                return;
+            }
+
+            $feedback = $this->consumeSyncFeedbackFromSession();
+            if (empty($feedback) && $this->isSyncRequest($requestData)) {
+                $feedback = $this->processSyncRequest($requestData);
+            }
+
+            if (!empty($feedback)) {
+                $this->applySyncFeedbackToView($feedback);
+            }
+
             // Load customers
             $customers = $this->loadCustomers();
             CE_Lib::log(4, "Ticaga: Loaded " . count($customers) . " customers");
@@ -94,7 +120,8 @@ class PluginTicaga extends SnapinPlugin
             $this->view->apiEmail = $this->getSetting('API Email Address');
             $this->view->autoSync = $this->getSetting('Auto Sync');
             $this->view->syncUrl = $this->buildSyncUrl();
-            
+            $this->view->sessionHash = $this->getSessionHashValue();
+            $this->view->settingsUrl = $this->buildSettingsUrl();
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Error: " . $e->getMessage());
             $this->view->error = $e->getMessage();
@@ -102,38 +129,64 @@ class PluginTicaga extends SnapinPlugin
     }
 
     /**
-     * Sync action handler
+     * Build a URL back to this snapin while preserving important routing parameters.
+     *
+     * @param array $overrides
+     * @param array $removals
+     * @return string
      */
-    function ticagaSync()
+    private function buildSnapinUrl(array $overrides = [], array $removals = [])
     {
-        try {
-            CE_Lib::log(4, "Ticaga: Sync action initiated");
-            
-            $bulkSync = isset($_REQUEST['bulk_sync']) ? (int)$_REQUEST['bulk_sync'] : 0;
-            $selectedCustomers = isset($_REQUEST['customer_ids']) ? $_REQUEST['customer_ids'] : [];
-            
-            if ($bulkSync) {
-                CE_Lib::log(4, "Ticaga: Starting bulk sync");
-                $result = $this->performBulkSync($selectedCustomers);
-            } else {
-                CE_Lib::log(4, "Ticaga: Starting single customer sync");
-                $customerId = isset($_REQUEST['customer_id']) ? (int)$_REQUEST['customer_id'] : 0;
-                $result = $this->syncSingleCustomer($customerId);
+        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+        $path = '/admin/index.php';
+        $queryParams = [];
+
+        if (!empty($uri)) {
+            $parts = parse_url($uri);
+            if (!empty($parts['path'])) {
+                $path = $parts['path'];
             }
-            
-            $this->view->syncResult = $result;
-            $this->view->success = $result['success'];
-            $this->view->message = $result['message'];
-            $this->view->syncedCount = isset($result['synced']) ? $result['synced'] : 0;
-            
-            $this->view->customers = $this->loadCustomers();
-            $this->view->ticagaUrl = $this->getSetting('Ticaga URL');
-            
-        } catch (Exception $e) {
-            CE_Lib::log(1, "Ticaga Sync Error: " . $e->getMessage());
-            $this->view->error = $e->getMessage();
-            $this->view->success = false;
+
+            if (!empty($parts['query'])) {
+                parse_str($parts['query'], $queryParams);
+            }
         }
+
+        $defaults = [
+            'fuse' => 'admin',
+            'controller' => 'snapins',
+            'view' => 'viewsnapin',
+            'plugin' => 'ticaga',
+            'action' => 'viewsnapin',
+            'v' => 'ticaga',
+        ];
+
+        foreach ($defaults as $key => $value) {
+            if (!isset($queryParams[$key]) || $queryParams[$key] === '') {
+                $queryParams[$key] = $value;
+            }
+        }
+
+        if (!empty($removals)) {
+            foreach ($removals as $removeKey) {
+                unset($queryParams[$removeKey]);
+            }
+        }
+
+        if (!empty($overrides)) {
+            foreach ($overrides as $key => $value) {
+                if ($value === null) {
+                    unset($queryParams[$key]);
+                    continue;
+                }
+
+                $queryParams[$key] = $value;
+            }
+        }
+
+        ksort($queryParams);
+
+        return $path . '?' . http_build_query($queryParams);
     }
 
     /**
@@ -141,7 +194,259 @@ class PluginTicaga extends SnapinPlugin
      */
     private function buildSyncUrl()
     {
-        return '/admin/index.php?fuse=admin&view=viewsnapin&controller=snapins&plugin=ticaga&action=ticagaSync';
+        $removals = ['ticaga_action', 'customer_id', 'customer_ids', 'bulk_sync', 'synced', 'failed', 'message', 'success'];
+
+        return $this->buildSnapinUrl([], $removals);
+    }
+
+    private function buildViewUrl()
+    {
+        $removals = ['ticaga_action', 'customer_id', 'customer_ids', 'bulk_sync', 'synced', 'failed', 'message', 'success'];
+
+        return $this->buildSnapinUrl([], $removals);
+    }
+
+    /**
+     * Combine query string and post body data for request inspection.
+     *
+     * @return array
+     */
+    private function collectRequestData()
+    {
+        $data = [];
+
+        if (isset($_GET) && is_array($_GET)) {
+            $data = $_GET;
+        }
+
+        if (isset($_POST) && is_array($_POST)) {
+            foreach ($_POST as $key => $value) {
+                $data[$key] = $value;
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Determine whether the current request is attempting to trigger a sync run.
+     *
+     * @param array $data
+     * @return bool
+     */
+    private function isSyncRequest(array $data)
+    {
+        if (!isset($data['ticaga_action'])) {
+            return false;
+        }
+
+        $action = trim((string) $data['ticaga_action']);
+
+        return strcasecmp($action, 'sync') === 0;
+    }
+
+    /**
+     * Dedicated sync endpoint used by form submissions. Processes the request then
+     * redirects back to the primary view so ClientExec renders the snapin normally.
+     */
+    public function ticagaSync()
+    {
+        $this->ensureSession();
+
+        $data = $this->collectRequestData();
+
+        if (!$this->isSyncRequest($data)) {
+            CE_Lib::redirect($this->buildViewUrl());
+            return;
+        }
+
+        $feedback = $this->processSyncRequest($data);
+        $this->storeSyncFeedbackForRedirect($feedback);
+
+        CE_Lib::redirect($this->buildViewUrl());
+    }
+
+    /**
+     * Build the URL that opens the Ticaga snapin settings configuration page.
+     *
+     * @return string
+     */
+    private function buildSettingsUrl()
+    {
+        return '/admin/index.php?fuse=admin&controller=settings&view=snapinsettings&plugin=ticaga&settings=plugins_snapins&type=Snapins';
+    }
+
+    /**
+     * Handle sync submissions made from the main view and return normalized feedback.
+     *
+     * @return array
+     */
+    private function processSyncRequest(array $data)
+    {
+        $action = isset($data['ticaga_action']) ? trim((string) $data['ticaga_action']) : '';
+        if ($action === '') {
+            return [
+                'success' => false,
+                'message' => 'Sync request was missing the Ticaga action flag.'
+            ];
+        }
+
+        if (strcasecmp($action, 'sync') !== 0) {
+            return [
+                'success' => false,
+                'message' => 'Unrecognized Ticaga sync action: ' . $action
+            ];
+        }
+
+        $result = null;
+        $errorMessage = null;
+
+        try {
+            CE_Lib::log(4, "Ticaga: Sync submission received");
+
+            $bulkSync = !empty($data['bulk_sync']);
+            $selectedCustomers = $this->extractCustomerIds($data);
+
+            if ($bulkSync) {
+                CE_Lib::log(4, "Ticaga: Starting bulk sync from action handler");
+                $result = $this->performBulkSync($selectedCustomers);
+            } else {
+                $customerId = isset($data['customer_id']) ? (int) $data['customer_id'] : 0;
+                CE_Lib::log(4, "Ticaga: Starting single customer sync from action handler ({$customerId})");
+                $result = $this->syncSingleCustomer($customerId);
+            }
+
+        } catch (Exception $e) {
+            CE_Lib::log(1, "Ticaga Sync Error: " . $e->getMessage());
+            $errorMessage = $e->getMessage();
+        }
+
+        return $this->normalizeSyncFeedback($result, $errorMessage);
+    }
+
+    /**
+     * Extract customer IDs from request data supporting arrays or comma-separated lists.
+     *
+     * @param array $data
+     * @return array
+     */
+    private function extractCustomerIds(array $data)
+    {
+        if (!isset($data['customer_ids'])) {
+            return [];
+        }
+
+        $rawIds = $data['customer_ids'];
+
+        if (!is_array($rawIds)) {
+            $rawIds = preg_split('/[\s,]+/', (string) $rawIds, -1, PREG_SPLIT_NO_EMPTY);
+        }
+
+        $normalized = [];
+
+        foreach ($rawIds as $rawId) {
+            if (is_array($rawId)) {
+                $rawId = reset($rawId);
+            }
+
+            $id = (int) $rawId;
+            if ($id > 0) {
+                $normalized[$id] = true;
+            }
+        }
+
+        return array_keys($normalized);
+    }
+
+    /**
+     * Normalize sync results or errors into a consistent array structure.
+     *
+     * @param array|null $result
+     * @param string|null $errorMessage
+     * @return array
+     */
+    private function normalizeSyncFeedback($result, $errorMessage)
+    {
+        $feedback = [];
+
+        if (is_array($result)) {
+            $feedback = $result;
+        }
+
+        if (!isset($feedback['message']) || $feedback['message'] === '') {
+            if (!empty($errorMessage)) {
+                $feedback['message'] = $errorMessage;
+            }
+        }
+
+        if (!isset($feedback['success'])) {
+            $feedback['success'] = empty($errorMessage) && !empty($feedback);
+        }
+
+        if (!isset($feedback['errors']) || !is_array($feedback['errors'])) {
+            $feedback['errors'] = [];
+        }
+
+        return $feedback;
+    }
+
+    /**
+     * Apply normalized sync feedback to the view instance for rendering.
+     *
+     * @param array $feedback
+     */
+    private function applySyncFeedbackToView(array $feedback)
+    {
+        if (isset($feedback['success'])) {
+            $this->view->success = (bool) $feedback['success'];
+        }
+
+        if (!empty($feedback['message'])) {
+            if (!empty($this->view->success)) {
+                $this->view->message = $feedback['message'];
+            } else {
+                $this->view->error = $feedback['message'];
+            }
+        }
+
+        if (isset($feedback['synced'])) {
+            $this->view->syncedCount = (int) $feedback['synced'];
+        }
+
+        if (!empty($feedback['errors'])) {
+            $this->view->syncErrors = array_values($feedback['errors']);
+        }
+    }
+
+    /**
+     * Persist sync feedback to the session so it can be displayed after a redirect.
+     */
+    private function storeSyncFeedbackForRedirect(array $feedback)
+    {
+        if (!isset($_SESSION)) {
+            return;
+        }
+
+        $_SESSION['ticaga_sync_feedback'] = $feedback;
+    }
+
+    /**
+     * Retrieve sync feedback stored in the session and clear it once consumed.
+     */
+    private function consumeSyncFeedbackFromSession()
+    {
+        if (!isset($_SESSION) || !isset($_SESSION['ticaga_sync_feedback'])) {
+            return [];
+        }
+
+        $feedback = $_SESSION['ticaga_sync_feedback'];
+        unset($_SESSION['ticaga_sync_feedback']);
+
+        if (!is_array($feedback)) {
+            return [];
+        }
+
+        return $feedback;
     }
 
     /**
@@ -365,37 +670,206 @@ class PluginTicaga extends SnapinPlugin
      */
     private function getSetting($key)
     {
-        // Build the key exactly as ClientExec stores it:
-        // plugin_ticaga_ (lowercase) + Setting Name (with underscores for spaces)
-        $settingKey = 'plugin_ticaga_' . str_replace(' ', '_', $key);
-        
-        // Try via settings object first
-        if (isset($this->settings) && is_object($this->settings)) {
+        $variants = $this->generateSettingKeyVariants($key);
+
+        // Try via settings object first using any key variation that might exist.
+        if (!empty($variants) && isset($this->settings) && is_object($this->settings)) {
             try {
                 if (method_exists($this->settings, 'get')) {
-                    $value = $this->settings->get($settingKey);
-                    if ($value !== null && $value !== '') {
-                        return $value;
+                    foreach ($variants as $variant) {
+                        $settingKey = 'plugin_ticaga_' . $variant;
+                        $value = $this->settings->get($settingKey);
+                        if ($value !== null && $value !== '') {
+                            return $value;
+                        }
                     }
                 }
             } catch (Exception $e) {
                 CE_Lib::log(2, "Ticaga: Settings object error: " . $e->getMessage());
             }
         }
-        
-        // Fallback: Direct database query
-        try {
-            $query = "SELECT value FROM setting WHERE name = ?";
-            $result = $this->db->query($query, $settingKey);
-            if ($result && $row = $result->fetch()) {
-                return $row['value'];
+
+        // Load cached settings from the database and attempt to resolve the requested key.
+        $this->buildPluginSettingsCache();
+        foreach ($variants as $variant) {
+            if (isset($this->pluginSettingsCache[$variant]) && $this->pluginSettingsCache[$variant] !== '') {
+                return $this->pluginSettingsCache[$variant];
             }
-        } catch (Exception $e) {
-            CE_Lib::log(2, "Ticaga: DB error getting setting: " . $e->getMessage());
         }
-        
+
+        // As a final attempt, look up each possible key variation in the database.
+        foreach ($variants as $variant) {
+            try {
+                $query = "SELECT value FROM setting WHERE name = ?";
+                $result = $this->db->query($query, 'plugin_ticaga_' . $variant);
+                if ($result && $row = $result->fetch()) {
+                    $value = $row['value'];
+                    if ($value !== null && $value !== '') {
+                        return $value;
+                    }
+                }
+            } catch (Exception $e) {
+                CE_Lib::log(2, "Ticaga: DB error getting setting ({$variant}): " . $e->getMessage());
+            }
+        }
+
         // Return default value
         $variables = $this->getVariables();
         return isset($variables[$key]['value']) ? $variables[$key]['value'] : '';
+    }
+
+    /**
+     * Normalize a setting key to the lowercase underscore format used by ClientExec.
+     *
+     * @param string $key
+     * @return string
+     */
+    private function normalizeSettingKey($key)
+    {
+        $normalizedKey = strtolower(trim($key));
+        $normalizedKey = preg_replace('/[^a-z0-9]+/', '_', $normalizedKey);
+        return trim($normalizedKey, '_');
+    }
+
+    /**
+     * Populate the settings cache with any values stored for the Ticaga plugin.
+     */
+    private function buildPluginSettingsCache()
+    {
+        if ($this->pluginSettingsCache !== null) {
+            return;
+        }
+
+        $this->pluginSettingsCache = [];
+
+        try {
+            $query = "SELECT name, value FROM setting WHERE name LIKE ?";
+            $result = $this->db->query($query, 'plugin_ticaga_%');
+
+            while ($result && ($row = $result->fetch())) {
+                $name = $row['name'];
+                $value = $row['value'];
+
+                if (stripos($name, 'plugin_ticaga_') !== 0) {
+                    continue;
+                }
+
+                $rawKey = substr($name, strlen('plugin_ticaga_'));
+                $variants = $this->generateSettingKeyVariants($rawKey);
+
+                foreach ($variants as $variant) {
+                    if ($variant === '') {
+                        continue;
+                    }
+
+                    if (!array_key_exists($variant, $this->pluginSettingsCache) || $this->pluginSettingsCache[$variant] === '') {
+                        $this->pluginSettingsCache[$variant] = $value;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            CE_Lib::log(2, "Ticaga: DB error building settings cache: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Generate possible key variants for a plugin setting to accommodate differences in how
+     * ClientExec persists configuration values (spaces, case, underscores, etc.).
+     *
+     * @param string $key
+     * @return array
+     */
+    private function generateSettingKeyVariants($key)
+    {
+        $variants = [];
+
+        $trimmed = trim((string) $key);
+        if ($trimmed === '') {
+            return $variants;
+        }
+
+        $base = [];
+        $base[] = $trimmed;
+        $base[] = str_replace(' ', '_', $trimmed);
+        $base[] = str_replace([' ', '-'], '_', $trimmed);
+        $base[] = str_replace([' ', '-', '_'], '', $trimmed);
+
+        $lowercaseVariants = [];
+        foreach ($base as $candidate) {
+            if ($candidate === '') {
+                continue;
+            }
+            $lowercaseVariants[] = strtolower($candidate);
+        }
+
+        $base = array_merge($base, $lowercaseVariants);
+
+        $normalized = $this->normalizeSettingKey($trimmed);
+        if ($normalized !== '') {
+            $base[] = $normalized;
+            $base[] = str_replace('_', '', $normalized);
+        }
+
+        $unique = [];
+        foreach ($base as $candidate) {
+            $candidate = trim($candidate);
+            $candidate = trim($candidate, '_');
+            if ($candidate === '') {
+                continue;
+            }
+
+            if (!isset($unique[$candidate])) {
+                $unique[$candidate] = true;
+            }
+        }
+
+        return array_keys($unique);
+    }
+
+    /**
+     * Ensure a PHP session is available before accessing $_SESSION.
+     */
+    private function ensureSession()
+    {
+        if (session_status() === PHP_SESSION_NONE) {
+            @session_start();
+        }
+    }
+
+    /**
+     * Retrieve the current ClientExec session hash if available.
+     *
+     * @return string
+     */
+    private function getSessionHashValue()
+    {
+        $this->ensureSession();
+
+        $candidates = [
+            isset($_REQUEST['sessionHash']) ? $_REQUEST['sessionHash'] : null,
+            isset($_SESSION['sessionHash']) ? $_SESSION['sessionHash'] : null,
+            isset($_SESSION['session_hash']) ? $_SESSION['session_hash'] : null,
+            isset($_COOKIE['sessionHash']) ? $_COOKIE['sessionHash'] : null,
+            isset($_COOKIE['session_hash']) ? $_COOKIE['session_hash'] : null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!empty($candidate)) {
+                return $candidate;
+            }
+        }
+
+        if (method_exists('CE_Lib', 'getSessionHash')) {
+            try {
+                $hash = CE_Lib::getSessionHash();
+                if (!empty($hash)) {
+                    return $hash;
+                }
+            } catch (Exception $e) {
+                // Ignore and fall through to empty string
+            }
+        }
+
+        return '';
     }
 }

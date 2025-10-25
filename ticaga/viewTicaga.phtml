@@ -15,6 +15,17 @@
             <?php endif; ?>
         </div>
     <?php endif; ?>
+
+    <?php if (!empty($this->syncErrors) && is_array($this->syncErrors)): ?>
+        <div class="alert alert-warning">
+            <strong>Some customers could not be synced:</strong>
+            <ul>
+                <?php foreach ($this->syncErrors as $syncError): ?>
+                    <li><?php echo $this->escape($syncError); ?></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    <?php endif; ?>
     
     <div class="row">
         <div class="col-md-6">
@@ -32,7 +43,7 @@
                         <p><strong>Ticaga URL:</strong> <?php echo $this->escape($this->ticagaUrl); ?></p>
                         <p><strong>API Email:</strong> <?php echo $this->escape($this->apiEmail); ?></p>
                         <p><strong>Auto Sync:</strong> <?php echo $this->autoSync == '1' ? 'Enabled' : 'Disabled'; ?></p>
-                        <a href="/admin/index.php?fuse=admin&view=editsnapin&controller=snapins&plugin=ticaga" class="btn btn-default">
+                        <a href="<?php echo $this->escape($this->settingsUrl ?? ''); ?>" class="btn btn-default">
                             <i class="fa fa-cog"></i> Configure Settings
                         </a>
                     <?php else: ?>
@@ -50,7 +61,7 @@
                                 <?php endif; ?>
                             </ul>
                         </div>
-                        <a href="/admin/index.php?fuse=admin&view=editsnapin&controller=snapins&plugin=ticaga" class="btn btn-primary">
+                        <a href="<?php echo $this->escape($this->settingsUrl ?? ''); ?>" class="btn btn-primary">
                             <i class="fa fa-cog"></i> Configure Now
                         </a>
                     <?php endif; ?>
@@ -65,15 +76,10 @@
                 </div>
                 <div class="panel-body">
                     <?php if ($isConfigured): ?>
-                        <form method="post" action="<?php echo $this->escape($this->syncUrl); ?>" id="bulkSyncForm">
-                            <input type="hidden" name="bulk_sync" value="1">
-                            <input type="hidden" name="sessionHash" value="<?php echo $this->escape($_SESSION['hash'] ?? ''); ?>">
-                            
-                            <button type="submit" class="btn btn-primary btn-block" id="syncAllBtn">
-                                <i class="fa fa-sync"></i> Sync All Customers
-                            </button>
-                        </form>
-                        
+                        <button type="button" class="btn btn-primary btn-block" id="syncAllBtn">
+                            <i class="fa fa-sync"></i> Sync All Customers
+                        </button>
+
                         <hr>
                         
                         <a href="<?php echo $this->escape($this->ticagaUrl); ?>" target="_blank" class="btn btn-info btn-block">
@@ -125,13 +131,9 @@
                             <td><?php echo $this->escape($customer['organization'] ?: '-'); ?></td>
                             <td>
                                 <?php if ($isConfigured): ?>
-                                <form method="post" action="<?php echo $this->escape($this->syncUrl); ?>" style="display:inline;">
-                                    <input type="hidden" name="customer_id" value="<?php echo (int)$customer['id']; ?>">
-                                    <input type="hidden" name="sessionHash" value="<?php echo $this->escape($_SESSION['hash'] ?? ''); ?>">
-                                    <button type="submit" class="btn btn-sm btn-primary" title="Sync this customer to Ticaga">
-                                        <i class="fa fa-sync"></i> Sync
-                                    </button>
-                                </form>
+                                <button type="button" class="btn btn-sm btn-primary ticaga-sync-single" data-customer-id="<?php echo (int)$customer['id']; ?>" title="Sync this customer to Ticaga">
+                                    <i class="fa fa-sync"></i> Sync
+                                </button>
                                 <?php endif; ?>
                                 <a href="/admin/index.php?fuse=clients&controller=clients&view=profile&id=<?php echo (int)$customer['id']; ?>" 
                                    class="btn btn-sm btn-info" title="View customer profile">
@@ -183,7 +185,9 @@ jQuery(document).ready(function($) {
     }
     
     // Sync selected customers
-    $('#syncSelectedBtn').on('click', function() {
+    $('#syncSelectedBtn').on('click', function(e) {
+        e.preventDefault();
+
         var selected = [];
         $('.customer-checkbox:checked').each(function() {
             selected.push($(this).val());
@@ -198,44 +202,79 @@ jQuery(document).ready(function($) {
             return;
         }
         
-        // Create form and submit
-        var form = $('<form>', {
-            'method': 'post',
-            'action': '<?php echo $this->escape($this->syncUrl ?? ''); ?>'
+        submitSyncRequest({
+            bulk_sync: 1,
+            customer_ids: selected
         });
-        
-        form.append($('<input>', {
-            'type': 'hidden',
-            'name': 'bulk_sync',
-            'value': '1'
-        }));
-        
-        form.append($('<input>', {
-            'type': 'hidden',
-            'name': 'sessionHash',
-            'value': '<?php echo $this->escape($_SESSION['hash'] ?? ''); ?>'
-        }));
-        
-        // Add selected customer IDs
-        $.each(selected, function(index, id) {
-            form.append($('<input>', {
-                'type': 'hidden',
-                'name': 'customer_ids[]',
-                'value': id
-            }));
-        });
-        
-        $('body').append(form);
-        form.submit();
     });
-    
-    // Confirm bulk sync
-    $('#bulkSyncForm').on('submit', function(e) {
+
+    // Sync all customers
+    $('#syncAllBtn').on('click', function(e) {
+        e.preventDefault();
+
         if (!confirm('Are you sure you want to sync ALL customers to Ticaga? This may take a while.')) {
-            e.preventDefault();
-            return false;
+            return;
         }
+
+        submitSyncRequest({
+            bulk_sync: 1
+        });
     });
+
+    // Sync individual customer
+    $('.ticaga-sync-single').on('click', function(e) {
+        e.preventDefault();
+
+        var customerId = $(this).data('customer-id');
+        if (!customerId) {
+            return;
+        }
+
+        submitSyncRequest({
+            customer_id: customerId
+        });
+    });
+
+    var syncUrl = <?php echo json_encode($this->syncUrl ?? ''); ?>;
+    var sessionHash = <?php echo json_encode($this->sessionHash ?? ''); ?>;
+
+    function submitSyncRequest(params) {
+        var form = $('<form>', {
+            method: 'post',
+            action: syncUrl
+        });
+
+        form.append(createHiddenInput('ticaga_action', 'sync'));
+
+        if (sessionHash) {
+            form.append(createHiddenInput('sessionHash', sessionHash));
+        }
+
+        if (params.bulk_sync) {
+            form.append(createHiddenInput('bulk_sync', '1'));
+        }
+
+        if (params.customer_id) {
+            form.append(createHiddenInput('customer_id', params.customer_id));
+        }
+
+        if (params.customer_ids && params.customer_ids.length) {
+            $.each(params.customer_ids, function(_, id) {
+                form.append(createHiddenInput('customer_ids[]', id));
+            });
+        }
+
+        $('body').append(form);
+        form.trigger('submit');
+    }
+
+    function createHiddenInput(name, value) {
+        return $('<input>', {
+            type: 'hidden',
+            name: name,
+            value: value
+        });
+    }
 });
 </script>
 
