@@ -91,15 +91,6 @@ class PluginTicaga extends SnapinPlugin
 
             $this->ensureSession();
 
-            $requestData = $_REQUEST;
-
-            if (isset($requestData['ticaga_action'])) {
-                $feedback = $this->processSyncRequest($requestData);
-                $this->storeSyncFeedbackForRedirect($feedback);
-                CE_Lib::redirect($this->buildViewUrl());
-                return;
-            }
-
             $feedback = $this->consumeSyncFeedbackFromSession();
             if (!empty($feedback)) {
                 $this->applySyncFeedbackToView($feedback);
@@ -116,6 +107,7 @@ class PluginTicaga extends SnapinPlugin
             $this->view->apiEmail = $this->getSetting('API Email Address');
             $this->view->autoSync = $this->getSetting('Auto Sync');
             $this->view->syncUrl = $this->buildSyncUrl();
+            $this->view->sessionHash = $this->getSessionHashValue();
             $this->view->settingsUrl = $this->buildSettingsUrl();
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Error: " . $e->getMessage());
@@ -191,7 +183,7 @@ class PluginTicaga extends SnapinPlugin
     {
         $removals = ['ticaga_action', 'customer_id', 'customer_ids', 'bulk_sync', 'synced', 'failed', 'message', 'success'];
 
-        return $this->buildSnapinUrl([], $removals);
+        return $this->buildSnapinUrl(['action' => 'ticagaSync'], $removals);
     }
 
     private function buildViewUrl()
@@ -208,6 +200,11 @@ class PluginTicaga extends SnapinPlugin
     public function ticagaSync()
     {
         $this->ensureSession();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            CE_Lib::redirect($this->buildViewUrl());
+            return;
+        }
 
         $feedback = $this->processSyncRequest($_REQUEST);
         $this->storeSyncFeedbackForRedirect($feedback);
@@ -783,5 +780,42 @@ class PluginTicaga extends SnapinPlugin
         if (session_status() === PHP_SESSION_NONE) {
             @session_start();
         }
+    }
+
+    /**
+     * Retrieve the current ClientExec session hash if available.
+     *
+     * @return string
+     */
+    private function getSessionHashValue()
+    {
+        $this->ensureSession();
+
+        $candidates = [
+            isset($_REQUEST['sessionHash']) ? $_REQUEST['sessionHash'] : null,
+            isset($_SESSION['sessionHash']) ? $_SESSION['sessionHash'] : null,
+            isset($_SESSION['session_hash']) ? $_SESSION['session_hash'] : null,
+            isset($_COOKIE['sessionHash']) ? $_COOKIE['sessionHash'] : null,
+            isset($_COOKIE['session_hash']) ? $_COOKIE['session_hash'] : null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!empty($candidate)) {
+                return $candidate;
+            }
+        }
+
+        if (method_exists('CE_Lib', 'getSessionHash')) {
+            try {
+                $hash = CE_Lib::getSessionHash();
+                if (!empty($hash)) {
+                    return $hash;
+                }
+            } catch (Exception $e) {
+                // Ignore and fall through to empty string
+            }
+        }
+
+        return '';
     }
 }

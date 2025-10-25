@@ -76,15 +76,9 @@
                 </div>
                 <div class="panel-body">
                     <?php if ($isConfigured): ?>
-                        <?php
-                        $syncAllUrl = $this->syncUrl;
-                        $separator = (strpos($syncAllUrl, '?') === false) ? '?' : '&';
-                        $syncAllUrl .= $separator . 'ticaga_action=sync&bulk_sync=1';
-                        ?>
-
-                        <a href="<?php echo $this->escape($syncAllUrl); ?>" class="btn btn-primary btn-block" id="syncAllBtn">
+                        <button type="button" class="btn btn-primary btn-block" id="syncAllBtn">
                             <i class="fa fa-sync"></i> Sync All Customers
-                        </a>
+                        </button>
 
                         <hr>
                         
@@ -137,14 +131,9 @@
                             <td><?php echo $this->escape($customer['organization'] ?: '-'); ?></td>
                             <td>
                                 <?php if ($isConfigured): ?>
-                                <?php
-                                    $singleSyncUrl = $this->syncUrl;
-                                    $singleSeparator = (strpos($singleSyncUrl, '?') === false) ? '?' : '&';
-                                    $singleSyncUrl .= $singleSeparator . 'ticaga_action=sync&customer_id=' . (int)$customer['id'];
-                                ?>
-                                <a href="<?php echo $this->escape($singleSyncUrl); ?>" class="btn btn-sm btn-primary" title="Sync this customer to Ticaga">
+                                <button type="button" class="btn btn-sm btn-primary ticaga-sync-single" data-customer-id="<?php echo (int)$customer['id']; ?>" title="Sync this customer to Ticaga">
                                     <i class="fa fa-sync"></i> Sync
-                                </a>
+                                </button>
                                 <?php endif; ?>
                                 <a href="/admin/index.php?fuse=clients&controller=clients&view=profile&id=<?php echo (int)$customer['id']; ?>" 
                                    class="btn btn-sm btn-info" title="View customer profile">
@@ -213,23 +202,80 @@ jQuery(document).ready(function($) {
             return;
         }
         
-        // Build a URL containing the selected IDs and trigger the sync
-        var baseUrl = '<?php echo $this->escape($this->syncUrl ?? ''); ?>';
-        var separator = (baseUrl.indexOf('?') === -1) ? '?' : '&';
-        var url = baseUrl + separator + 'ticaga_action=sync&bulk_sync=1';
-
-        url += '&customer_ids=' + encodeURIComponent(selected.join(','));
-
-        window.location = url;
+        submitSyncRequest({
+            bulk_sync: 1,
+            customer_ids: selected
+        });
     });
 
-    // Confirm bulk sync link
+    // Sync all customers
     $('#syncAllBtn').on('click', function(e) {
+        e.preventDefault();
+
         if (!confirm('Are you sure you want to sync ALL customers to Ticaga? This may take a while.')) {
-            e.preventDefault();
-            return false;
+            return;
         }
+
+        submitSyncRequest({
+            bulk_sync: 1
+        });
     });
+
+    // Sync individual customer
+    $('.ticaga-sync-single').on('click', function(e) {
+        e.preventDefault();
+
+        var customerId = $(this).data('customer-id');
+        if (!customerId) {
+            return;
+        }
+
+        submitSyncRequest({
+            customer_id: customerId
+        });
+    });
+
+    var syncUrl = <?php echo json_encode($this->syncUrl ?? ''); ?>;
+    var sessionHash = <?php echo json_encode($this->sessionHash ?? ''); ?>;
+
+    function submitSyncRequest(params) {
+        var form = $('<form>', {
+            method: 'post',
+            action: syncUrl
+        });
+
+        form.append(createHiddenInput('action', 'ticagaSync'));
+        form.append(createHiddenInput('ticaga_action', 'sync'));
+
+        if (sessionHash) {
+            form.append(createHiddenInput('sessionHash', sessionHash));
+        }
+
+        if (params.bulk_sync) {
+            form.append(createHiddenInput('bulk_sync', '1'));
+        }
+
+        if (params.customer_id) {
+            form.append(createHiddenInput('customer_id', params.customer_id));
+        }
+
+        if (params.customer_ids && params.customer_ids.length) {
+            $.each(params.customer_ids, function(_, id) {
+                form.append(createHiddenInput('customer_ids[]', id));
+            });
+        }
+
+        $('body').append(form);
+        form.trigger('submit');
+    }
+
+    function createHiddenInput(name, value) {
+        return $('<input>', {
+            type: 'hidden',
+            name: name,
+            value: value
+        });
+    }
 });
 </script>
 
