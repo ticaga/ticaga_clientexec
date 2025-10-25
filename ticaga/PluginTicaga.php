@@ -112,12 +112,18 @@ class PluginTicaga extends SnapinPlugin
      */
     function ticagaSync()
     {
+        $result = null;
+
         try {
             CE_Lib::log(4, "Ticaga: Sync action initiated");
-            
+
             $bulkSync = isset($_REQUEST['bulk_sync']) ? (int)$_REQUEST['bulk_sync'] : 0;
             $selectedCustomers = isset($_REQUEST['customer_ids']) ? $_REQUEST['customer_ids'] : [];
-            
+
+            if (!is_array($selectedCustomers)) {
+                $selectedCustomers = [$selectedCustomers];
+            }
+
             if ($bulkSync) {
                 CE_Lib::log(4, "Ticaga: Starting bulk sync");
                 $result = $this->performBulkSync($selectedCustomers);
@@ -126,19 +132,26 @@ class PluginTicaga extends SnapinPlugin
                 $customerId = isset($_REQUEST['customer_id']) ? (int)$_REQUEST['customer_id'] : 0;
                 $result = $this->syncSingleCustomer($customerId);
             }
-            
-            $this->view->syncResult = $result;
-            $this->view->success = $result['success'];
-            $this->view->message = $result['message'];
-            $this->view->syncedCount = isset($result['synced']) ? $result['synced'] : 0;
-            
-            $this->view->customers = $this->loadCustomers();
-            $this->view->ticagaUrl = $this->getSetting('Ticaga URL');
-            
+
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Sync Error: " . $e->getMessage());
             $this->view->error = $e->getMessage();
             $this->view->success = false;
+        }
+
+        // Always reload the main view template so the user is redirected back to the
+        // snapin interface rather than a blank page for the sync action.
+        $this->viewTicaga();
+
+        if (is_array($result)) {
+            $this->view->syncResult = $result;
+            $this->view->success = $result['success'];
+            $this->view->message = $result['message'];
+            $this->view->syncedCount = isset($result['synced']) ? (int)$result['synced'] : 0;
+
+            if (isset($result['errors'])) {
+                $this->view->syncErrors = $result['errors'];
+            }
         }
     }
 
