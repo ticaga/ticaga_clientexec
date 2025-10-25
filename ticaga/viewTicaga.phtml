@@ -76,16 +76,16 @@
                 </div>
                 <div class="panel-body">
                     <?php if ($isConfigured): ?>
-                        <form method="get" action="<?php echo $this->escape($this->syncUrl); ?>" id="bulkSyncForm">
-                            <input type="hidden" name="ticaga_action" value="sync">
-                            <input type="hidden" name="bulk_sync" value="1">
-                            <input type="hidden" name="sessionHash" value="<?php echo $this->escape($this->sessionHash ?? ''); ?>">
+                        <?php
+                        $syncAllUrl = $this->syncUrl;
+                        $separator = (strpos($syncAllUrl, '?') === false) ? '?' : '&';
+                        $syncAllUrl .= $separator . 'ticaga_action=sync&bulk_sync=1';
+                        ?>
 
-                            <button type="submit" class="btn btn-primary btn-block" id="syncAllBtn">
-                                <i class="fa fa-sync"></i> Sync All Customers
-                            </button>
-                        </form>
-                        
+                        <a href="<?php echo $this->escape($syncAllUrl); ?>" class="btn btn-primary btn-block" id="syncAllBtn">
+                            <i class="fa fa-sync"></i> Sync All Customers
+                        </a>
+
                         <hr>
                         
                         <a href="<?php echo $this->escape($this->ticagaUrl); ?>" target="_blank" class="btn btn-info btn-block">
@@ -137,14 +137,14 @@
                             <td><?php echo $this->escape($customer['organization'] ?: '-'); ?></td>
                             <td>
                                 <?php if ($isConfigured): ?>
-                                <form method="get" action="<?php echo $this->escape($this->syncUrl); ?>" style="display:inline;">
-                                    <input type="hidden" name="ticaga_action" value="sync">
-                                    <input type="hidden" name="customer_id" value="<?php echo (int)$customer['id']; ?>">
-                                    <input type="hidden" name="sessionHash" value="<?php echo $this->escape($this->sessionHash ?? ''); ?>">
-                                    <button type="submit" class="btn btn-sm btn-primary" title="Sync this customer to Ticaga">
-                                        <i class="fa fa-sync"></i> Sync
-                                    </button>
-                                </form>
+                                <?php
+                                    $singleSyncUrl = $this->syncUrl;
+                                    $singleSeparator = (strpos($singleSyncUrl, '?') === false) ? '?' : '&';
+                                    $singleSyncUrl .= $singleSeparator . 'ticaga_action=sync&customer_id=' . (int)$customer['id'];
+                                ?>
+                                <a href="<?php echo $this->escape($singleSyncUrl); ?>" class="btn btn-sm btn-primary" title="Sync this customer to Ticaga">
+                                    <i class="fa fa-sync"></i> Sync
+                                </a>
                                 <?php endif; ?>
                                 <a href="/admin/index.php?fuse=clients&controller=clients&view=profile&id=<?php echo (int)$customer['id']; ?>" 
                                    class="btn btn-sm btn-info" title="View customer profile">
@@ -196,7 +196,9 @@ jQuery(document).ready(function($) {
     }
     
     // Sync selected customers
-    $('#syncSelectedBtn').on('click', function() {
+    $('#syncSelectedBtn').on('click', function(e) {
+        e.preventDefault();
+
         var selected = [];
         $('.customer-checkbox:checked').each(function() {
             selected.push($(this).val());
@@ -211,45 +213,18 @@ jQuery(document).ready(function($) {
             return;
         }
         
-        // Create form and submit
-        var form = $('<form>', {
-            'method': 'get',
-            'action': '<?php echo $this->escape($this->syncUrl ?? ''); ?>'
-        });
+        // Build a URL containing the selected IDs and trigger the sync
+        var baseUrl = '<?php echo $this->escape($this->syncUrl ?? ''); ?>';
+        var separator = (baseUrl.indexOf('?') === -1) ? '?' : '&';
+        var url = baseUrl + separator + 'ticaga_action=sync&bulk_sync=1';
 
-        form.append($('<input>', {
-            'type': 'hidden',
-            'name': 'ticaga_action',
-            'value': 'sync'
-        }));
+        url += '&customer_ids=' + encodeURIComponent(selected.join(','));
 
-        form.append($('<input>', {
-            'type': 'hidden',
-            'name': 'bulk_sync',
-            'value': '1'
-        }));
-        
-        form.append($('<input>', {
-            'type': 'hidden',
-            'name': 'sessionHash',
-            'value': '<?php echo $this->escape($this->sessionHash ?? ''); ?>'
-        }));
-        
-        // Add selected customer IDs
-        $.each(selected, function(index, id) {
-            form.append($('<input>', {
-                'type': 'hidden',
-                'name': 'customer_ids[]',
-                'value': id
-            }));
-        });
-        
-        $('body').append(form);
-        form.submit();
+        window.location = url;
     });
-    
-    // Confirm bulk sync
-    $('#bulkSyncForm').on('submit', function(e) {
+
+    // Confirm bulk sync link
+    $('#syncAllBtn').on('click', function(e) {
         if (!confirm('Are you sure you want to sync ALL customers to Ticaga? This may take a while.')) {
             e.preventDefault();
             return false;

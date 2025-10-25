@@ -115,8 +115,6 @@ class PluginTicaga extends SnapinPlugin
             $this->view->autoSync = $this->getSetting('Auto Sync');
             $this->view->syncUrl = $this->buildSyncUrl();
             $this->view->settingsUrl = $this->buildSettingsUrl();
-            $this->view->sessionHash = $this->getSessionHash();
-            
         } catch (Exception $e) {
             CE_Lib::log(1, "Ticaga Error: " . $e->getMessage());
             $this->view->error = $e->getMessage();
@@ -173,29 +171,6 @@ class PluginTicaga extends SnapinPlugin
     }
 
     /**
-     * Retrieve the current ClientExec session hash for form submissions.
-     *
-     * @return string
-     */
-    private function getSessionHash()
-    {
-        $this->ensureSession();
-
-        if (!empty($_SESSION['hash'])) {
-            return $_SESSION['hash'];
-        }
-
-        if (method_exists('CE_Lib', 'getSessionHash')) {
-            $hash = CE_Lib::getSessionHash();
-            if (!empty($hash)) {
-                return $hash;
-            }
-        }
-
-        return '';
-    }
-
-    /**
      * Dedicated sync endpoint used by form submissions. Processes the request then
      * redirects back to the primary view so ClientExec renders the snapin normally.
      */
@@ -248,13 +223,7 @@ class PluginTicaga extends SnapinPlugin
             CE_Lib::log(4, "Ticaga: Sync submission received");
 
             $bulkSync = !empty($data['bulk_sync']);
-            $selectedCustomers = isset($data['customer_ids']) ? $data['customer_ids'] : [];
-
-            if (!is_array($selectedCustomers)) {
-                $selectedCustomers = [$selectedCustomers];
-            }
-
-            $selectedCustomers = array_values(array_filter(array_map('intval', $selectedCustomers)));
+            $selectedCustomers = $this->extractCustomerIds($data);
 
             if ($bulkSync) {
                 CE_Lib::log(4, "Ticaga: Starting bulk sync from action handler");
@@ -271,6 +240,40 @@ class PluginTicaga extends SnapinPlugin
         }
 
         return $this->normalizeSyncFeedback($result, $errorMessage);
+    }
+
+    /**
+     * Extract customer IDs from request data supporting arrays or comma-separated lists.
+     *
+     * @param array $data
+     * @return array
+     */
+    private function extractCustomerIds(array $data)
+    {
+        if (!isset($data['customer_ids'])) {
+            return [];
+        }
+
+        $rawIds = $data['customer_ids'];
+
+        if (!is_array($rawIds)) {
+            $rawIds = preg_split('/[\s,]+/', (string) $rawIds, -1, PREG_SPLIT_NO_EMPTY);
+        }
+
+        $normalized = [];
+
+        foreach ($rawIds as $rawId) {
+            if (is_array($rawId)) {
+                $rawId = reset($rawId);
+            }
+
+            $id = (int) $rawId;
+            if ($id > 0) {
+                $normalized[$id] = true;
+            }
+        }
+
+        return array_keys($normalized);
     }
 
     /**
